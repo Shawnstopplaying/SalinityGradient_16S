@@ -104,7 +104,7 @@ forward_filteredQual_plot_12 <-
   plotQualityProfile(forward_reads[random_samples]) +
   labs(title = "Forward Reads : Raw Quality")
 #reverse quality plot
-reverse_fileredQual_plot_12 <-
+reverse_filteredQual_plot_12 <-
   plotQualityProfile(reverse_reads[random_samples]) +
   labs(title = "Reverse Reads : Raw Quality")
   

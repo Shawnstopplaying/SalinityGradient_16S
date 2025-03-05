@@ -1,0 +1,256 @@
+---
+title: "Triming"
+output: html_document
+date: "2025-03-05"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      fig.align = "center",
+                      #send figures generated in this folder
+                      fig.path = "../figures/02_AssignASVs/")
+```
+
+
+# Set up the environment
+## Set seed
+```{r set-seed}
+set.seed{20020206}
+```
+
+
+## Load packages
+```{r load-packages}
+pacman::p_load(tidyverse, devtools, dada2,
+               patchwork, DT, install = FALSE)
+
+```
+
+
+#Goals
+
+1. Infer Errors in our sequences, sepearately on forward and reverse reads.
+2. Assign ASVs on both forward and reverse reads separately. Apply the error model.
+3. Merge forward and reverse ASVs in "Contiguous ASVs"
+4. Generate first draft of ASV count table.
+5. Quality Trimming ASV lengths.
+6. Remove chimeras.
+7. Assign Taxonomy with Silva Database.
+8. Write out relevant files: 'asv_table', 'asv_fasta', 'tax_table', and 'sample_data'.
+
+
+## Input
+
+1. Filtered fastq files generated from '01_QualityTrimming.Rmd'.
+2. Sample Name vector.
+
+
+## Output
+
+1. 'asv_table'
+2. 'asv_fasta'
+3. 'tax_table'
+4. 'sample_data'
+
+
+
+# Load filtered fastq files
+```{r load-filtered-files}
+# place filtered seq filed into a variable
+filtered_fastqs_path <- "data/01_DADA2/02_filtered_fastqs"
+
+# Intuition check
+filtered_fastqs_path
+
+# Create forward vector
+filtered_forward_reads <-
+  list.files(filtered_fastqs_path, pattern = "R1_filtered.fastq.gz",
+             full.names = TRUE)
+
+# Check
+filtered_forward_reads[1:5]
+
+# Create forward vector
+filtered_reverse_reads <-
+  list.files(filtered_fastqs_path, pattern = "R2_filtered.fastq.gz",
+             full.names = TRUE)
+
+# Check
+filtered_reverse_reads[1:5]
+```
+
+
+# Sample Names
+```{r sample-names}
+# Create vector of sample names from the filenames 
+sample_names <- sapply(strsplit(basename(filtered_forwards_reads), "_"), `[`,1) 
+
+# Intuition Check 
+head(sample_names)
+
+```
+
+
+```{r learn-errors}
+# Forward Reads
+error_forward_reads <-
+  learnErrors(filtered_forward_reads, multithread = 6)
+
+# Plot
+forward_error_plot <-
+  plotErrors(error_forward_reads, nominalQ = TRUE) +
+  labs(title = "Forward Read: Error Model")
+forward_error_plot
+
+# Reverse Reads
+error_reverse_reads <-
+  learnErrors(filtered_reverse_reads, multithread = 6)
+
+# Plot
+reverse_error_plot <-
+  plotErrors(error_reverse_reads, nominalQ = TRUE) +
+  labs(title = "Reverse Read: Error Model")
+reverse_error_plot
+
+# Look at the plots together
+forward_error_plot + reverse_error_plot
+```
+
+# Infer ASVs
+```{r infer-ASVs}
+# Forward ASVs
+dada_forward <-
+  dada(filtered_forward_reads,
+       err = error_forward_reads,
+       multithread = 6)
+
+# Take a look at the data
+typeof(dada_forward)
+dada_forward
+
+# Reverse ASVs
+dada_reverse <-
+  dada(filtered_reverse_reads,
+       err = error_reverse_reads,
+       multithread = 6)
+
+# Take a look at the data
+typeof(dada_reverse)
+dada_reverse[30]
+
+```
+
+
+# Merge Forward and Reverse ASVs
+```{r merge-ASVs}
+merged_ASVs <-
+  mergePairs(dada_forward, filtered_forward_reads,
+             dada_reverse, filtered_reverse_reads,
+             verbose = TRUE)
+
+
+# Evaluate the data output
+typeof(merged_ASVs)
+length(merged_ASVs)
+names(merged_ASVs)
+
+# Inspect further
+head(merged_ASVs)
+merged_ASVs$`022um-Control_R1_filtered.fastq.gz`
+
+
+```
+
+
+# Create a rough
+```{r raw-ASV-count-table}
+# Raw ASV
+raw_ASV_table <- makeSequenceTable(merged_ASVs)
+
+# Check
+dim(raw_ASV_table)
+typeof(raw_ASV_table)
+class(raw_ASV_table)
+
+# Write out raw_ASV_table
+write.table(raw_ASV_table, file = "data/01_DADA2/raw_ASV_counts.tsv",
+            sep = "\t", quote = FALSE, col.names = NA)
+
+
+```
+
+
+# Assess the ASV Length
+```{r assess-ASV-length}
+# Creating a table to inspect the distribution of ASV lengths
+table(nchar(getSequences(raw_ASV_table)))
+
+#Plot
+data.frame(ASV_Length = nchar(getSequences(raw_ASV_table))) %>%
+  ggplot(aes(x = ASV_Length)) + 
+  geom_histogram() +
+  scale_x_continuous(limits = c(0, 500)) +
+  labs(title = "Raw ASV Lengths",
+       y = "Number of ASVs", x = "ASV Sequence Length (bps)")
+```
+
+
+# Trim ASVs
+```{r trim-ASVs}
+
+# Only pull ASVs that have a length of 245 bps
+raw_ASV_table_trimmed <-
+  raw_ASV_table[,nchar(getSequences(raw_ASV_table)) == 245]
+raw_ASV_table_trimmed
+
+# Intuition Check
+table(nchar(getSequences(raw_ASV_table_trimmed)))
+
+#Plot
+data.frame(ASV_Length = nchar(getSequences(raw_ASV_table_trimmed))) %>%
+  ggplot(aes(x = ASV_Length)) + 
+  geom_histogram() +
+  scale_x_continuous(limits = c(0, 500)) +
+  labs(title = "Trimed Raw ASV Lengths",
+       y = "Number of ASVs", x = "ASV Sequence Length (bps)")
+```
+
+
+# Remove Chimeras
+```{r remove-chimeras}
+noChimeras_ASV_table <-
+  removeBimeraDenovo(raw_ASV_table_trimmed,
+                     method = "consensus",
+                     multithread = 6,
+                     verbose = TRUE)
+
+# Structure of data
+dim(noChimeras_ASV_table)
+dim(raw_ASV_table_trimmed)
+
+```
+
+
+# Track the number of reads DARA2 workflow
+
+# Assign Taxonomy
+
+
+
+
+
+
+
+
+
+
+
+
+# Session Information
+```{r session-info}
+# Ensure reproducibility with package version information
+devtools::as.package()
+
+```
