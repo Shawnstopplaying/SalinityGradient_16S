@@ -2,3 +2,4 @@
 */*.fastq.gz
 */*/*.fastq.gz
 
+.Rproj.user
